@@ -1,0 +1,25 @@
+[package]
+name = "ppick"
+description = "A simple, no-fuss TUI picker menu"
+version = "0.1.0"
+authors = ["grazen0 <josedanielgrayson@proton.me>"]
+license = "MIT"
+homepage = "https://github.com/Grazen0/ppick"
+repository = "https://github.com/Grazen0/ppick"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+clap = { version = "4.5.32", features = ["derive"] }
+crossterm = "0.28.1"
+derive_more = { version = "2.0.1", features = [
+    "display",
+    "error",
+    "is_variant",
+] }
+thiserror = "2.0.12"
+
+[build-dependencies]
+clap = { version = "4.5.32", features = ["derive"] }
+clap_complete = "4.5.46"
+clap_mangen = "0.2.26"
