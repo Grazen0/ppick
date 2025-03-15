@@ -5,7 +5,7 @@ use std::{
 
 use clap::CommandFactory;
 use clap_complete::Shell;
-use cli::Cli;
+use cli::Args;
 
 #[path = "src/cli.rs"]
 mod cli;
@@ -13,7 +13,7 @@ mod cli;
 fn generate_man_pages(out_dir: &Path, bin: &str) -> io::Result<()> {
     let out_dir = out_dir.join("man");
 
-    let cmd = Cli::command();
+    let cmd = Args::command();
     let man = clap_mangen::Man::new(cmd);
     let mut buf = vec![];
     man.render(&mut buf)?;
@@ -34,7 +34,7 @@ fn generate_completions(out_dir: &Path, bin: &str) -> io::Result<()> {
         Shell::PowerShell,
     ];
 
-    let mut cmd = Cli::command();
+    let mut cmd = Args::command();
 
     fs::create_dir_all(&out_dir)?;
     for sh in SHELLS {

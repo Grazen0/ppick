@@ -9,7 +9,7 @@ use crossterm::{
 };
 use derive_more::{Display, Error, IsVariant};
 
-use crate::{cli::Cli, ct_extra, numeric};
+use crate::{cli::Args, ct_extra, numeric};
 
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -80,7 +80,7 @@ macro_rules! impl_error_from {
 impl_error_from!(io::Error);
 
 pub struct App {
-    pub cli: Cli,
+    pub args: Args,
     pub entries: Vec<Entry>,
     pub selection: Option<usize>,
     pub input: String,
@@ -89,9 +89,9 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cli: Cli, entries: Vec<Entry>) -> Self {
+    pub fn new(args: Args, entries: Vec<Entry>) -> Self {
         Self {
-            cli,
+            args,
             entries,
             selection: Some(0),
             input: String::new(),
@@ -156,7 +156,7 @@ impl App {
             queue!(
                 tty,
                 ct_extra::MoveUpExact((self.entries.len() - selection - 1) as u16),
-                style::PrintStyledContent(self.cli.indicator.dark_red()),
+                style::PrintStyledContent(self.args.indicator.dark_red()),
                 cursor::MoveToColumn(0),
                 ct_extra::MoveUpExact(selection as u16),
             )?;
@@ -202,7 +202,7 @@ impl App {
         let mut new_input = self.input.clone();
         new_input.push(ch);
 
-        if !self.cli.unrestricted_input
+        if !self.args.unrestricted_input
             && !self
                 .entries
                 .iter()
@@ -212,7 +212,7 @@ impl App {
         } else {
             self.input = new_input;
 
-            if !self.cli.no_auto_accept {
+            if !self.args.no_auto_accept {
                 self.try_auto_accept();
             }
 
@@ -232,7 +232,7 @@ impl App {
         let selections_left: Vec<_> = self
             .entries
             .iter()
-            .filter(|entry| entry.body.starts_with(&self.input))
+            .filter(|entry| entry.is_selectable(&self.input))
             .collect();
 
         if selections_left.len() == 1 && selections_left[0].auto_accept {
@@ -283,7 +283,7 @@ impl App {
                 SearchDirection::Backwards => numeric::wrapping_dec(candidate, self.entries.len()),
             };
 
-            if did_wrap && self.cli.no_wrap {
+            if did_wrap && self.args.no_wrap {
                 self.redraw = false;
                 break;
             }

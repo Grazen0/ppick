@@ -5,7 +5,7 @@ use std::{
 
 use app::{App, AppError, Entry};
 use clap::Parser;
-use cli::Cli;
+use cli::Args;
 use crossterm::{
     cursor, execute,
     terminal::{self, ClearType},
@@ -57,7 +57,7 @@ fn into_entry(lines: &[String], ln_index: usize) -> Entry {
 }
 
 fn try_main() -> Result<(), AppError> {
-    let cli = Cli::parse();
+    let cli = Args::parse();
 
     let mut buf = String::new();
     io::stdin().lock().read_to_string(&mut buf)?;

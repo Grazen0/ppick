@@ -2,7 +2,7 @@ use clap::Parser;
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
-pub struct Cli {
+pub struct Args {
     /// Whether to clear the screen before showing the picker.
     #[arg(short, long)]
     pub clear: bool,
