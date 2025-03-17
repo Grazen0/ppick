@@ -1,14 +1,18 @@
-use crossterm::cursor;
+use std::io::{self, Write};
 
-#[derive(Debug, Clone, Copy)]
-pub struct MoveUpExact(pub u16);
+use crossterm::{
+    cursor, queue,
+    terminal::{self, ClearType},
+};
 
-impl crossterm::Command for MoveUpExact {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        if self.0 > 0 {
-            cursor::MoveUp(self.0).write_ansi(f)
-        } else {
-            Ok(())
-        }
+pub fn queue_move_up_exact(file: &mut impl Write, lines: u16) -> io::Result<()> {
+    if lines > 0 {
+        queue!(file, cursor::MoveUp(lines))
+    } else {
+        Ok(())
     }
+}
+
+pub fn queue_clear_and_reset_cursor(file: &mut impl Write) -> io::Result<()> {
+    queue!(file, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))
 }

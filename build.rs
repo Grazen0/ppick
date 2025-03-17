@@ -7,7 +7,7 @@ use clap::CommandFactory;
 use clap_complete::Shell;
 use cli::Args;
 
-#[path = "src/cli.rs"]
+#[path = "src/cli/args.rs"]
 mod cli;
 
 fn generate_man_pages(out_dir: &Path, bin: &str) -> io::Result<()> {

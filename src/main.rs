@@ -1,91 +1,73 @@
 use std::{
     fs::OpenOptions,
-    io::{self, Read, Write},
+    io::{self, Read},
+    panic::{self, PanicHookInfo},
 };
 
-use app::{App, AppError, Entry};
+use app::App;
 use clap::Parser;
-use cli::Args;
-use crossterm::{
-    cursor, execute,
-    terminal::{self, ClearType},
-};
+use cli::{Args, CliError};
 
 mod app;
 mod cli;
 mod ct_extra;
+mod menu;
 mod numeric;
+mod string;
 
-fn parse_lines(input: &str) -> Vec<String> {
-    let lines: Vec<_> = input.trim().lines().map(String::from).collect();
-    if lines.is_empty() {
-        vec![String::new()]
-    } else {
-        lines
-    }
+fn get_tty() -> io::Result<impl io::Write> {
+    OpenOptions::new().write(true).open("/dev/tty")
 }
 
-fn reset_screen(tty: &mut impl Write) -> io::Result<()> {
-    execute!(tty, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))
+fn add_panic_hook(hook: Box<dyn Fn(&PanicHookInfo<'_>) + 'static + Sync + Send>) {
+    let original_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
+        hook(panic_info);
+        original_hook(panic_info);
+    }));
 }
 
-fn into_entry(lines: &[String], ln_index: usize) -> Entry {
-    assert!(ln_index < lines.len());
-
-    let src_line = &lines[ln_index];
-    let mut prefix_len = 0;
-    let mut auto_accept = true;
-
-    while lines
-        .iter()
-        .enumerate()
-        .any(|(i, ln)| i != ln_index && ln.starts_with(&src_line[..prefix_len]))
-    {
-        if prefix_len == src_line.len() {
-            auto_accept = false;
-            break;
-        } else {
-            prefix_len += 1;
-        }
-    }
-
-    Entry {
-        body: src_line.to_string(),
-        prefix_len,
-        auto_accept,
-    }
-}
-
-fn try_main() -> Result<(), AppError> {
-    let cli = Args::parse();
-
+fn try_main(args: Args) -> Result<(), CliError> {
     let mut buf = String::new();
     io::stdin().lock().read_to_string(&mut buf)?;
-    let lines = parse_lines(&buf);
-    let entries = (0..lines.len()).map(|i| into_entry(&lines, i)).collect();
+    let lines: Vec<_> = buf.lines().map(String::from).collect();
 
-    let mut tty = OpenOptions::new().write(true).open("/dev/tty")?;
-
-    if cli.clear {
-        let _ = reset_screen(&mut tty);
+    if lines.is_empty() {
+        return Err(CliError::NoInput);
     }
 
-    let mut app = App::new(cli, entries);
-    app.init(&mut tty)?;
-    let result = app.run(&mut tty);
-    app.deinit(&mut tty)?;
+    let mut tty = get_tty()?;
 
-    result.map(|selection| {
-        println!("{}", selection);
-    })
+    if args.clear {
+        let _ = ct_extra::queue_clear_and_reset_cursor(&mut tty);
+    }
+
+    let mut app = App::new(args, &lines);
+    App::init(&mut tty)?;
+
+    add_panic_hook(Box::new(|_| {
+        let _ = get_tty().and_then(|mut tty| App::deinit(&mut tty));
+    }));
+
+    let result = app.run(&mut tty);
+    App::deinit(&mut tty)?;
+
+    result
+        .map_err(CliError::from)
+        .and_then(|selection| selection.ok_or(CliError::Interrupted))
+        .map(|selection| {
+            println!("{selection}");
+        })
 }
 
 fn main() {
-    let main_result = try_main();
+    let args @ Args { silent, .. } = Args::parse();
+    let main_result = try_main(args);
+
     if let Err(err) = main_result {
-        if err.is_other() {
+        if !err.is_interrupted() && !silent {
             eprintln!("{}", err);
         }
-        std::process::exit(err.code());
+        std::process::exit(130);
     }
 }

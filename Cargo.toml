@@ -12,14 +12,11 @@ build = "build.rs"
 [dependencies]
 clap = { version = "4.5.32", features = ["derive"] }
 crossterm = "0.28.1"
-derive_more = { version = "2.0.1", features = [
-    "display",
-    "error",
-    "is_variant",
-] }
-thiserror = "2.0.12"
+derive_more = { version = "2.0.1", features = ["display", "error", "from", "is_variant"] }
 
 [build-dependencies]
 clap = { version = "4.5.32", features = ["derive"] }
 clap_complete = "4.5.46"
 clap_mangen = "0.2.26"
+crossterm = "0.28.1"
+derive_more = { version = "2.0.1", features = ["display", "error", "from"] }

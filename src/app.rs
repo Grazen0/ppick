@@ -7,106 +7,38 @@ use crossterm::{
     style::{self, StyledContent, Stylize},
     terminal::{self, ClearType},
 };
-use derive_more::{Display, Error, IsVariant};
 
-use crate::{cli::Args, ct_extra, numeric};
-
-#[derive(Debug, Clone)]
-pub struct Entry {
-    pub body: String,
-    pub prefix_len: usize,
-    pub auto_accept: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum SearchDirection {
-    Forwards,
-    Backwards,
-}
-
-impl Entry {
-    pub fn is_selectable(&self, input: &str) -> bool {
-        self.body.starts_with(input)
-    }
-
-    pub fn stylize(&self, input: &str) -> Vec<StyledContent<impl std::fmt::Display>> {
-        if !self.is_selectable(input) {
-            vec![self.body.clone().dark_grey()]
-        } else if input.len() >= self.prefix_len {
-            vec![
-                input.to_string().dark_red().bold(),
-                self.body[input.len()..].to_string().stylize(),
-            ]
-        } else {
-            vec![
-                input.to_string().dark_red().bold(),
-                self.body[input.len()..self.prefix_len]
-                    .to_string()
-                    .dark_blue()
-                    .bold(),
-                self.body[self.prefix_len..].to_string().stylize(),
-            ]
-        }
-    }
-}
-
-#[derive(Debug, Display, Error, IsVariant)]
-pub enum AppError {
-    #[display("picker was interrupted")]
-    Interrupted,
-    #[display("{_0}")]
-    Other(Box<dyn std::error::Error>),
-}
-
-impl AppError {
-    pub fn code(&self) -> i32 {
-        match self {
-            Self::Interrupted => 2,
-            Self::Other(_) => 130,
-        }
-    }
-}
-
-macro_rules! impl_error_from {
-    ($t:ty) => {
-        impl From<$t> for AppError {
-            fn from(value: $t) -> Self {
-                Self::Other(value.into())
-            }
-        }
-    };
-}
-
-impl_error_from!(io::Error);
+use crate::{
+    cli::Args,
+    ct_extra,
+    menu::{Entry, Menu, SearchDirection},
+    string,
+};
 
 pub struct App {
     pub args: Args,
-    pub entries: Vec<Entry>,
-    pub selection: Option<usize>,
+    pub menu: Menu,
     pub input: String,
-    pub exit_value: Option<String>,
-    pub redraw: bool,
+    pub exit_value: Option<Option<String>>,
 }
 
 impl App {
-    pub fn new(args: Args, entries: Vec<Entry>) -> Self {
+    pub fn new(args: Args, lines: &[String]) -> Self {
         Self {
             args,
-            entries,
-            selection: Some(0),
+            menu: Menu::from_lines(lines),
             input: String::new(),
             exit_value: None,
-            redraw: true,
         }
     }
 
-    pub fn init(&self, tty: &mut impl Write) -> io::Result<()> {
+    pub fn init(tty: &mut impl Write) -> io::Result<()> {
         terminal::enable_raw_mode()?;
         execute!(tty, cursor::Hide)?;
         Ok(())
     }
 
-    pub fn deinit(&self, tty: &mut impl Write) -> io::Result<()> {
+    pub fn deinit(tty: &mut impl Write) -> io::Result<()> {
         execute!(
             tty,
             cursor::Show,
@@ -117,70 +49,101 @@ impl App {
         Ok(())
     }
 
-    pub fn run(&mut self, tty: &mut impl Write) -> Result<String, AppError> {
+    pub fn run(&mut self, tty: &mut impl Write) -> io::Result<Option<String>> {
+        let mut redraw = true;
+
         loop {
-            if self.redraw {
+            if redraw {
                 self.draw(tty)?;
             }
 
-            self.redraw = true;
-            self.handle_events()?;
+            redraw = self.handle_events()?;
 
-            if let Some(value) = &self.exit_value {
-                break Ok(value.clone());
+            if let Some(value) = self.exit_value.take() {
+                break Ok(value);
             }
         }
     }
 
-    fn draw(&self, tty: &mut impl Write) -> Result<(), AppError> {
-        for (i, entry) in self.entries.iter().enumerate() {
+    fn draw(&self, tty: &mut impl Write) -> io::Result<()> {
+        for (i, entry) in self.menu.entries().iter().enumerate() {
             queue!(
                 tty,
                 terminal::Clear(ClearType::CurrentLine),
-                style::Print(" "),
-                style::Print(" ")
+                style::Print("  "),
             )?;
 
-            for el in entry.stylize(&self.input) {
+            for el in self.stylize_entry(entry) {
                 queue!(tty, style::Print(el))?;
             }
 
             queue!(tty, cursor::MoveToColumn(0))?;
 
-            if i < self.entries.len() - 1 {
+            if i < self.menu.len() - 1 {
                 queue!(tty, style::Print("\n"))?;
             }
         }
 
-        if let Some(selection) = self.selection {
+        if let Some(&selection) = self.menu.selection() {
+            ct_extra::queue_move_up_exact(tty, (self.menu.len() - selection - 1) as u16)?;
             queue!(
                 tty,
-                ct_extra::MoveUpExact((self.entries.len() - selection - 1) as u16),
-                style::PrintStyledContent(self.args.indicator.dark_red()),
+                style::PrintStyledContent(self.args.indicator.with(self.args.hl_indicator)),
                 cursor::MoveToColumn(0),
-                ct_extra::MoveUpExact(selection as u16),
             )?;
+            ct_extra::queue_move_up_exact(tty, selection as u16)?;
         } else {
-            queue!(tty, ct_extra::MoveUpExact((self.entries.len() - 1) as u16))?;
+            ct_extra::queue_move_up_exact(tty, (self.menu.len() - 1) as u16)?;
         }
 
         tty.flush()?;
         Ok(())
     }
 
-    fn handle_events(&mut self) -> Result<(), AppError> {
-        if let Event::Key(
-            key @ KeyEvent {
-                kind: KeyEventKind::Press,
-                ..
-            },
-        ) = event::read()?
+    fn stylize_entry(&self, entry: &Entry) -> Vec<StyledContent<impl std::fmt::Display>> {
+        if !entry.is_selectable(&self.input) {
+            vec![entry.body.clone().with(self.args.hl_disabled_entry)]
+        } else {
+            let input_seg = self
+                .input
+                .to_string()
+                .with(self.args.hl_input_overlay)
+                .bold();
+
+            if self.input.len() >= entry.prefix_len {
+                vec![
+                    input_seg,
+                    entry.body[self.input.len()..].to_string().stylize(),
+                ]
+            } else {
+                vec![
+                    input_seg,
+                    entry.body[self.input.len()..entry.prefix_len]
+                        .to_string()
+                        .with(self.args.hl_prefix)
+                        .bold(),
+                    entry.body[entry.prefix_len..].to_string().stylize(),
+                ]
+            }
+        }
+    }
+
+    fn handle_events(&mut self) -> io::Result<bool> {
+        if let Event::Key(KeyEvent {
+            kind: KeyEventKind::Press,
+            modifiers,
+            code,
+            ..
+        }) = event::read()?
         {
-            match (key.modifiers, key.code) {
+            let redraw = match (modifiers, code) {
                 (KeyModifiers::NONE, KeyCode::Esc)
-                | (KeyModifiers::CONTROL, KeyCode::Char('c')) => return Err(AppError::Interrupted),
-                (KeyModifiers::NONE, KeyCode::Char(ch)) => self.try_input_type(ch),
-                (KeyModifiers::NONE, KeyCode::Enter) => self.try_accept(),
+                | (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+                    self.exit_value = Some(None);
+                    false
+                }
+                (KeyModifiers::NONE, KeyCode::Char(ch)) => self.input_type(ch),
+                (KeyModifiers::NONE, KeyCode::Enter) => self.try_manual_accept(),
                 (KeyModifiers::NONE, KeyCode::Backspace) => self.input_delete_char(),
                 (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.input_delete_word(),
                 (KeyModifiers::CONTROL, KeyCode::Char('n'))
@@ -191,24 +154,20 @@ impl App {
                 | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
                     self.move_selection(SearchDirection::Backwards)
                 }
-                _ => self.redraw = false,
-            }
+                _ => false,
+            };
+            Ok(redraw)
+        } else {
+            Ok(false)
         }
-
-        Ok(())
     }
 
-    fn try_input_type(&mut self, ch: char) {
+    fn input_type(&mut self, ch: char) -> bool {
         let mut new_input = self.input.clone();
         new_input.push(ch);
 
-        if !self.args.unrestricted_input
-            && !self
-                .entries
-                .iter()
-                .any(|entry| entry.is_selectable(&new_input))
-        {
-            self.redraw = false;
+        if !self.args.unrestricted_input && !self.menu.has_selectable(&new_input) {
+            false
         } else {
             self.input = new_input;
 
@@ -216,82 +175,49 @@ impl App {
                 self.try_auto_accept();
             }
 
-            self.update_selection();
+            self.menu.update_selection(&self.input);
+            true
         }
     }
 
-    fn try_accept(&mut self) {
-        if let Some(selection) = self.selection {
-            self.exit_value = Some(self.entries[selection].body.clone());
+    fn input_delete_char(&mut self) -> bool {
+        if self.input.is_empty() {
+            false
         } else {
-            self.redraw = false;
-        }
-    }
-
-    fn try_auto_accept(&mut self) {
-        let selections_left: Vec<_> = self
-            .entries
-            .iter()
-            .filter(|entry| entry.is_selectable(&self.input))
-            .collect();
-
-        if selections_left.len() == 1 && selections_left[0].auto_accept {
-            self.exit_value = Some(selections_left[0].body.clone());
-        }
-    }
-
-    fn input_delete_char(&mut self) {
-        if !self.input.is_empty() {
             self.input.pop();
+            true
         }
     }
 
-    fn input_delete_word(&mut self) {
-        self.input = self
-            .input
-            .rsplit_once(' ')
-            .map(|(rem, _)| rem.to_string() + " ")
-            .unwrap_or_default();
+    fn input_delete_word(&mut self) -> bool {
+        if self.input.is_empty() {
+            false
+        } else {
+            self.input = string::delete_word(&self.input);
+            true
+        }
     }
 
-    fn update_selection(&mut self) {
-        let start = self.selection.unwrap_or(0);
-
-        let search_result = self.entries[start..]
-            .iter()
-            .enumerate()
-            .find(|(_, entry)| entry.is_selectable(&self.input))
-            .map(|(i, _)| start + i)
-            .or_else(|| {
-                self.entries[..start]
-                    .iter()
-                    .enumerate()
-                    .rfind(|(_, entry)| entry.is_selectable(&self.input))
-                    .map(|(i, _)| i)
-            });
-
-        self.selection = search_result;
+    fn move_selection(&mut self, direction: SearchDirection) -> bool {
+        self.menu
+            .move_selection(&self.input, direction, !self.args.no_wrap)
     }
 
-    fn move_selection(&mut self, direction: SearchDirection) {
-        let mut candidate = self.selection.unwrap_or(0);
-        let mut did_wrap;
+    fn try_manual_accept(&mut self) -> bool {
+        if let Some(entry) = self.menu.manual_accept() {
+            self.exit_value = Some(Some(entry.body.clone()));
+            true
+        } else {
+            false
+        }
+    }
 
-        loop {
-            (candidate, did_wrap) = match direction {
-                SearchDirection::Forwards => numeric::wrapping_inc(candidate, self.entries.len()),
-                SearchDirection::Backwards => numeric::wrapping_dec(candidate, self.entries.len()),
-            };
-
-            if did_wrap && self.args.no_wrap {
-                self.redraw = false;
-                break;
-            }
-
-            if self.entries[candidate].is_selectable(&self.input) {
-                self.selection = Some(candidate);
-                break;
-            }
+    fn try_auto_accept(&mut self) -> bool {
+        if let Some(accepted_entry) = self.menu.find_acceptable(&self.input) {
+            self.exit_value = Some(Some(accepted_entry.body.clone()));
+            true
+        } else {
+            false
         }
     }
 }
