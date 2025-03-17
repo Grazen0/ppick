@@ -1,7 +1,7 @@
 [package]
 name = "ppick"
 description = "A simple, no-fuss TUI picker menu"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["grazen0 <josedanielgrayson@proton.me>"]
 license = "MIT"
 homepage = "https://github.com/Grazen0/ppick"
