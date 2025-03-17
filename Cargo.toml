@@ -1,6 +1,6 @@
 [package]
 name = "ppick"
-description = "A simple, no-fuss TUI picker menu"
+description = "A simple, no-fuss CLI picker menu"
 version = "1.0.0"
 authors = ["grazen0 <josedanielgrayson@proton.me>"]
 license = "MIT"

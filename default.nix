@@ -33,7 +33,7 @@ in
     '';
 
     meta = with lib; {
-      description = "A simple, no-fuss TUI picker menu";
+      description = "A simple, no-fuss CLI picker menu";
       homepage = manifest.homepage;
       license = licenses.mit;
       mainProgram = "ppick";

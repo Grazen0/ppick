@@ -1,5 +1,5 @@
 {
-  description = "A simple, no-fuss TUI picker menu";
+  description = "A simple, no-fuss CLI picker menu";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
