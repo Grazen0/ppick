@@ -18,8 +18,9 @@ Use `ppick --help` to find more about the possible flags.
 
 ### Features
 
-- [ ] Supports Unicode (probably already does, but needs testing).
+- [ ] Unicode support (probably works already, but needs testing).
 - [ ] Allows showing the current query.
+- [ ] Mouse support.
 
 ## Development
 
